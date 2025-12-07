@@ -1,55 +1,68 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!-- Sync Impact Report:
+Version change: None → 1.0.0
+List of modified principles:
+  - Added: Academic rigor with industry relevance
+  - Added: Hands-on, project-based learning approach
+  - Added: Accessibility across skill levels (beginners to advanced)
+  - Added: Integration of theoretical concepts with practical implementation
+  - Added: Key standards
+Added sections: Constraints, Success Criteria
+Removed sections: None
+Templates requiring updates:
+  - .specify/templates/plan-template.md: ⚠ pending
+  - .specify/templates/spec-template.md: ⚠ pending
+  - .specify/templates/tasks-template.md: ⚠ pending
+  - .specify/templates/commands/sp.adr.md: ⚠ pending
+  - .specify/templates/commands/sp.analyze.md: ⚠ pending
+  - .specify/templates/commands/sp.checklist.md: ⚠ pending
+  - .specify/templates/commands/sp.clarify.md: ⚠ pending
+  - .specify/templates/commands/sp.constitution.md: ⚠ pending
+  - .specify/templates/commands/sp.git.commit_pr.md: ⚠ pending
+  - .specify/templates/commands/sp.implement.md: ⚠ pending
+  - .specify/templates/commands/sp.plan.md: ⚠ pending
+  - .specify/templates/commands/sp.phr.md: ⚠ pending
+  - .specify/templates/commands/sp.specify.md: ⚠ pending
+  - .specify/templates/commands/sp.tasks.md: ⚠ pending
+Follow-up TODOs: None
+-->
+# AI-Native Textbook on Physical AI & Humanoid Robotics Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### Academic rigor with industry relevance
+All technical concepts must be traceable to official documentation or peer-reviewed sources
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### Hands-on, project-based learning approach
+Code examples: Must be executable with clear setup instructions
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### Accessibility across skill levels (beginners to advanced)
+Language clarity: Flesch-Kincaid grade 12-14 (university level)
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### Integration of theoretical concepts with practical implementation
+Visual content: Include diagrams, screenshots, and simulation visualizations
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### Key standards
+- Citation format: APA style for academic references
+- Source types: Mix of peer-reviewed papers, official documentation (ROS 2, NVIDIA), and industry best practices
+- All claims about hardware performance must be verified with manufacturer specifications
 
-### [PRINCIPLE_6_NAME]
+## Constraints
 
+- Book length: 15-20 chapters, 300-400 pages equivalent
+- Minimum 50 code examples with working implementations
+- Must include assessment questions and project ideas for each module
+- Format: Docusaurus markdown with interactive elements
+- Timeline: Hackathon submission by Nov 30, 2025
 
-[PRINCIPLE__DESCRIPTION]
+## Success Criteria
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
-
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
-
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
-
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+- Complete Docusaurus book deployed to GitHub Pages
+- Integrated RAG chatbot answering questions about book content
+- All code examples tested and verified
+- Clear learning progression from basics to capstone project
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+Constitution supersedes all other practices; Amendments require documentation, approval, migration plan. All changes must align with project goals and principles.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2025-12-02 | **Last Amended**: 2025-12-02
