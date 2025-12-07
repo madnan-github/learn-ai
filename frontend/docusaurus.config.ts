@@ -45,7 +45,7 @@ const config: Config = {
 
           // ✅ EDIT LINK FOR JUDGES
           editUrl:
-            'https://github.com/madnan-github/ai-robo-learning/tree/main/',
+            'https://github.com/madnan-github/learn-ai/tree/main/',
 
           showLastUpdateAuthor: true,
           showLastUpdateTime: true,
@@ -59,7 +59,7 @@ const config: Config = {
           },
 
           editUrl:
-            'https://github.com/madnan-github/ai-robo-learning/tree/main/',
+            'https://github.com/madnan-github/learn-ai/tree/main/',
 
           onInlineTags: 'warn',
           onInlineAuthors: 'warn',
@@ -115,7 +115,7 @@ const config: Config = {
         },
 
         {
-          href: 'https://github.com/madnan-github/ai-robo-learning',
+          href: 'https://github.com/madnan-github/learn-ai',
           label: '⭐ GitHub',
           position: 'right',
         },
@@ -178,7 +178,7 @@ const config: Config = {
             },
             {
               label: 'GitHub',
-              href: 'https://github.com/madnan-github/ai-robo-learning',
+              href: 'https://github.com/madnan-github/learn-ai',
             },
           ],
         },
