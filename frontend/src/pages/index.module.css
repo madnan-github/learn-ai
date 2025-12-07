@@ -4,20 +4,73 @@
  */
 
 .heroBanner {
-  padding: 4rem 0;
+  padding: 6rem 0;
   text-align: center;
   position: relative;
   overflow: hidden;
+  background: linear-gradient(135deg, #0a2e38 0%, #1a5d6a 100%);
+  color: white;
 }
 
 @media screen and (max-width: 996px) {
   .heroBanner {
-    padding: 2rem;
+    padding: 3rem 1rem;
   }
+}
+
+.heroContent {
+  max-width: 800px;
+  margin: 0 auto;
 }
 
 .buttons {
   display: flex;
+  gap: 1rem;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 2rem;
+}
+
+@media screen and (max-width: 576px) {
+  .buttons {
+    flex-direction: column;
+  }
+}
+
+.infoSection {
+  padding: 4rem 0;
+  background-color: #f9f9f9;
+}
+
+@media screen and (max-width: 996px) {
+  .infoSection {
+    padding: 2rem 0;
+  }
+}
+
+.infoCard {
+  background: white;
+  border-radius: 8px;
+  padding: 2rem;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  height: 100%;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.infoCard:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+}
+
+.infoCard h3 {
+  margin-top: 0;
+  color: #0a2e38;
+  font-size: 1.5rem;
+}
+
+.infoCard p {
+  color: #555;
+  line-height: 1.6;
 }

@@ -1,0 +1,1975 @@
+---
+sidebar_position: 3
+title: 'Cognitive Planning with LLMs'
+---
+
+# Cognitive Planning with LLMs
+
+This chapter covers using Large Language Models (LLMs) for cognitive planning in robotics, enabling robots to understand complex natural language commands and translate them into executable action sequences.
+
+## What You'll Learn
+
+In this chapter, you'll explore:
+- LLM integration for robotic planning
+- Natural language command interpretation
+- Task decomposition and sequencing
+- Context-aware planning
+- Multi-modal reasoning
+- Safety and validation in LLM-driven robotics
+
+## Prerequisites
+
+- Completion of Module 1-4, Chapter 2
+- Understanding of ROS 2 messaging and services
+- Basic knowledge of AI/ML concepts
+- Experience with Python and API integration
+- Understanding of robot action execution
+
+## LLM Integration for Robotic Planning
+
+### Overview of LLM-Based Planning
+
+Large Language Models can serve as cognitive planners for robots by:
+
+1. **Understanding Natural Language**: Interpreting complex commands in human language
+2. **Task Decomposition**: Breaking down high-level goals into executable steps
+3. **Context Reasoning**: Using environmental and situational context
+4. **Action Sequencing**: Planning the order of robot actions
+5. **Safety Validation**: Ensuring planned actions are safe and feasible
+
+### Basic LLM Integration Node
+
+```python
+#!/usr/bin/env python3
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from geometry_msgs.msg import PoseStamped
+from action_msgs.msg import GoalStatus
+import openai
+import json
+import re
+import threading
+from queue import Queue
+
+class LLMCognitivePlanner(Node):
+    def __init__(self):
+        super().__init__('llm_cognitive_planner')
+
+        # Subscribe to natural language commands
+        self.command_sub = self.create_subscription(
+            String,
+            '/natural_language_command',
+            self.command_callback,
+            10
+        )
+
+        # Publishers for planning results
+        self.plan_pub = self.create_publisher(String, '/cognitive_plan', 10)
+        self.status_pub = self.create_publisher(String, '/planning_status', 10)
+
+        # LLM configuration
+        self.api_key = None  # Should be set via environment variable
+        self.model = "gpt-3.5-turbo"  # or "gpt-4" for better performance
+        self.max_tokens = 500
+        self.temperature = 0.3
+
+        # Planning queue
+        self.planning_queue = Queue()
+        self.planning_thread = threading.Thread(target=self.planning_worker, daemon=True)
+        self.planning_thread.start()
+
+        # Robot capabilities and environment context
+        self.robot_capabilities = [
+            "move_forward", "move_backward", "turn_left", "turn_right",
+            "spin_left", "spin_right", "stop", "pick_object", "place_object",
+            "navigate_to", "detect_object", "grasp", "release"
+        ]
+
+        self.environment_context = {
+            "room_layout": "The room has a door to the north, a window to the east, and a table in the center.",
+            "object_locations": {
+                "book": [1.0, 2.0, 0.0],
+                "cup": [1.5, 1.5, 0.0],
+                "chair": [0.5, 0.5, 0.0]
+            },
+            "robot_position": [0.0, 0.0, 0.0]
+        }
+
+        self.get_logger().info('LLM Cognitive Planner initialized')
+
+    def command_callback(self, msg):
+        """Process natural language command"""
+        command = msg.data.strip()
+        if command:
+            self.get_logger().info(f'Received command: "{command}"')
+            self.planning_queue.put(command)
+
+    def planning_worker(self):
+        """Worker thread for LLM-based planning"""
+        while rclpy.ok():
+            try:
+                command = self.planning_queue.get(timeout=1.0)
+                self.process_command_with_llm(command)
+            except:
+                continue  # Timeout, continue loop
+
+    def process_command_with_llm(self, command):
+        """Process command using LLM"""
+        try:
+            # Prepare the prompt for the LLM
+            prompt = self.create_planning_prompt(command)
+
+            # Call the LLM API
+            response = openai.ChatCompletion.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.get_system_prompt()},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=self.max_tokens,
+                temperature=self.temperature
+            )
+
+            # Extract the plan from the response
+            plan_json = response.choices[0].message.content.strip()
+
+            # Validate and publish the plan
+            if self.validate_plan(plan_json):
+                self.publish_plan(plan_json)
+                self.get_logger().info(f'Generated plan for command: "{command}"')
+            else:
+                self.get_logger().error('Invalid plan generated by LLM')
+
+        except Exception as e:
+            self.get_logger().error(f'LLM planning error: {str(e)}')
+            # Publish error status
+            status_msg = String()
+            status_msg.data = f"error: {str(e)}"
+            self.status_pub.publish(status_msg)
+
+    def create_planning_prompt(self, command):
+        """Create prompt for LLM planning"""
+        prompt = f"""
+        You are a cognitive planner for a humanoid robot. Your task is to decompose a natural language command into a sequence of executable robot actions.
+
+        Robot capabilities: {', '.join(self.robot_capabilities)}
+        Environment context: {json.dumps(self.environment_context, indent=2)}
+
+        Command: "{command}"
+
+        Please respond with a JSON object containing:
+        1. "actions": A list of robot actions to execute
+        2. "reasoning": Brief explanation of your plan
+        3. "estimated_time": Estimated time to complete the task in seconds
+
+        Each action should be a dictionary with:
+        - "action": The specific action to take
+        - "parameters": Any required parameters (position, object, etc.)
+        - "description": Human-readable description of the action
+
+        Example response format:
+        {{
+            "actions": [
+                {{
+                    "action": "navigate_to",
+                    "parameters": {{"x": 1.0, "y": 2.0}},
+                    "description": "Move to position (1.0, 2.0)"
+                }},
+                {{
+                    "action": "pick_object",
+                    "parameters": {{"object": "book"}},
+                    "description": "Pick up the book"
+                }}
+            ],
+            "reasoning": "The user wants me to get the book from the table. I need to navigate to the table and then pick up the book.",
+            "estimated_time": 30
+        }}
+        """
+        return prompt
+
+    def get_system_prompt(self):
+        """Get system prompt for LLM"""
+        return """
+        You are an expert robotic cognitive planner. Your role is to translate natural language commands into structured action plans for a humanoid robot.
+
+        Guidelines:
+        1. Always consider robot safety and physical constraints
+        2. Use only the robot capabilities provided
+        3. Provide realistic time estimates
+        4. Include error handling in your plans when appropriate
+        5. Ensure the plan is executable in the given environment
+        6. Break complex tasks into simple, sequential actions
+        7. If a command is ambiguous, make reasonable assumptions based on context
+        8. Return only valid JSON with the specified structure
+        """
+
+    def validate_plan(self, plan_json_str):
+        """Validate the plan returned by LLM"""
+        try:
+            plan = json.loads(plan_json_str)
+
+            # Check required fields
+            required_fields = ['actions', 'reasoning', 'estimated_time']
+            if not all(field in plan for field in required_fields):
+                return False
+
+            # Validate actions
+            if not isinstance(plan['actions'], list):
+                return False
+
+            for action in plan['actions']:
+                if not isinstance(action, dict):
+                    return False
+                if 'action' not in action:
+                    return False
+                # Check if action is in robot capabilities
+                if action['action'] not in self.robot_capabilities:
+                    # Allow navigation and other common actions that might not be explicitly listed
+                    pass
+
+            return True
+
+        except json.JSONDecodeError:
+            return False
+        except Exception:
+            return False
+
+    def publish_plan(self, plan_json_str):
+        """Publish the generated plan"""
+        plan_msg = String()
+        plan_msg.data = plan_json_str
+        self.plan_pub.publish(plan_msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = LLMCognitivePlanner()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        print("Shutting down LLM cognitive planner...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    # Set your OpenAI API key here or via environment variable
+    # openai.api_key = "your-api-key-here"
+    main()
+```
+
+## Advanced Planning with Context Awareness
+
+### Context-Aware Cognitive Planning
+
+```python
+#!/usr/bin/env python3
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from geometry_msgs.msg import PoseStamped, Point
+from sensor_msgs.msg import LaserScan, Image
+from nav_msgs.msg import OccupancyGrid
+import openai
+import json
+import threading
+from queue import Queue
+import time
+
+class ContextAwarePlanner(Node):
+    def __init__(self):
+        super().__init__('context_aware_planner')
+
+        # Subscribe to natural language commands
+        self.command_sub = self.create_subscription(
+            String,
+            '/natural_language_command',
+            self.command_callback,
+            10
+        )
+
+        # Subscribe to environmental sensors
+        self.scan_sub = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.scan_callback,
+            10
+        )
+
+        self.map_sub = self.create_subscription(
+            OccupancyGrid,
+            '/map',
+            self.map_callback,
+            10
+        )
+
+        # Publishers
+        self.plan_pub = self.create_publisher(String, '/context_aware_plan', 10)
+        self.status_pub = self.create_publisher(String, '/context_status', 10)
+
+        # LLM configuration
+        self.model = "gpt-4"  # Using GPT-4 for better reasoning
+        self.max_tokens = 800
+        self.temperature = 0.2
+
+        # Context data
+        self.current_scan = None
+        self.current_map = None
+        self.last_update_time = time.time()
+        self.context_update_interval = 5.0  # seconds
+
+        # Planning queue
+        self.planning_queue = Queue()
+        self.planning_thread = threading.Thread(target=self.planning_worker, daemon=True)
+        self.planning_thread.start()
+
+        # Robot and environment context
+        self.robot_state = {
+            "position": [0.0, 0.0, 0.0],
+            "orientation": [0.0, 0.0, 0.0, 1.0],  # quaternion
+            "battery_level": 100.0,
+            "current_task": None
+        }
+
+        self.environment_state = {
+            "obstacles": [],
+            "navigable_areas": [],
+            "object_locations": {},
+            "room_layout": "unknown"
+        }
+
+        self.get_logger().info('Context-Aware Planner initialized')
+
+    def command_callback(self, msg):
+        """Process natural language command with context"""
+        command = msg.data.strip()
+        if command:
+            self.get_logger().info(f'Received command: "{command}"')
+
+            # Update context if needed
+            self.update_context()
+
+            # Add to planning queue
+            self.planning_queue.put({
+                'command': command,
+                'timestamp': time.time(),
+                'context': self.get_current_context()
+            })
+
+    def scan_callback(self, msg):
+        """Process laser scan for obstacle detection"""
+        self.current_scan = msg
+
+    def map_callback(self, msg):
+        """Process occupancy grid for map information"""
+        self.current_map = msg
+
+    def update_context(self):
+        """Update environmental context from sensors"""
+        current_time = time.time()
+        if current_time - self.last_update_time < self.context_update_interval:
+            return  # Don't update too frequently
+
+        # Update obstacles from laser scan
+        if self.current_scan is not None:
+            self.update_obstacles_from_scan()
+
+        # Update map information
+        if self.current_map is not None:
+            self.update_map_context()
+
+        self.last_update_time = current_time
+
+    def update_obstacles_from_scan(self):
+        """Extract obstacle information from laser scan"""
+        scan = self.current_scan
+        obstacles = []
+
+        # Process scan ranges to identify obstacles
+        for i, range_val in enumerate(scan.ranges):
+            if range_val > scan.range_min and range_val < scan.range_max:
+                angle = scan.angle_min + i * scan.angle_increment
+                x = range_val * __import__('math').cos(angle)
+                y = range_val * __import__('math').sin(angle)
+
+                # Only add obstacles within a reasonable distance
+                if range_val < 2.0:  # 2 meters threshold
+                    obstacles.append({
+                        'x': x,
+                        'y': y,
+                        'distance': range_val,
+                        'angle': angle
+                    })
+
+        self.environment_state['obstacles'] = obstacles
+
+    def update_map_context(self):
+        """Update map context from occupancy grid"""
+        # Extract relevant information from the map
+        map_info = self.current_map.info
+        self.environment_state['room_layout'] = f"Map size: {map_info.width}x{map_info.height}, resolution: {map_info.resolution}"
+
+    def get_current_context(self):
+        """Get current environmental and robot context"""
+        return {
+            "robot_state": self.robot_state,
+            "environment_state": self.environment_state,
+            "timestamp": time.time()
+        }
+
+    def planning_worker(self):
+        """Worker thread for context-aware planning"""
+        while rclpy.ok():
+            try:
+                plan_request = self.planning_queue.get(timeout=1.0)
+                self.process_command_with_context(plan_request)
+            except:
+                continue
+
+    def process_command_with_context(self, plan_request):
+        """Process command using LLM with environmental context"""
+        command = plan_request['command']
+        context = plan_request['context']
+
+        try:
+            # Create detailed prompt with context
+            prompt = self.create_contextual_prompt(command, context)
+
+            # Call LLM API
+            response = openai.ChatCompletion.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.get_contextual_system_prompt()},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=self.max_tokens,
+                temperature=self.temperature
+            )
+
+            plan_json = response.choices[0].message.content.strip()
+
+            # Validate and publish plan
+            if self.validate_contextual_plan(plan_json):
+                self.publish_contextual_plan(plan_json, command)
+                self.get_logger().info(f'Generated contextual plan for: "{command}"')
+            else:
+                self.get_logger().error('Invalid contextual plan generated')
+
+        except Exception as e:
+            self.get_logger().error(f'Contextual planning error: {str(e)}')
+            status_msg = String()
+            status_msg.data = f"error: {str(e)}"
+            self.status_pub.publish(status_msg)
+
+    def create_contextual_prompt(self, command, context):
+        """Create prompt with environmental context"""
+        return f"""
+        You are an advanced cognitive planner for a humanoid robot. Consider the current environmental context when creating plans.
+
+        Current robot state: {json.dumps(context['robot_state'], indent=2)}
+        Current environment state: {json.dumps(context['environment_state'], indent=2)}
+
+        Natural language command: "{command}"
+
+        Create a detailed action plan that accounts for:
+        1. Current obstacles and navigable areas
+        2. Robot's current position and battery level
+        3. Environmental constraints and layout
+        4. Safety considerations based on obstacle positions
+
+        Respond with a JSON object containing:
+        - "actions": List of sequential actions with parameters
+        - "safety_considerations": How the plan accounts for obstacles/safety
+        - "alternative_paths": Other possible approaches if primary plan fails
+        - "estimated_time": Time estimate considering environmental factors
+        - "confidence": Your confidence level in this plan (0-1)
+
+        Each action should include:
+        - "action": The specific action
+        - "parameters": Required parameters
+        - "preconditions": Conditions that must be true before execution
+        - "expected_outcome": What should happen after execution
+        """
+
+    def get_contextual_system_prompt(self):
+        """System prompt for contextual planning"""
+        return """
+        You are an expert contextual robotic planner. Your role is to create safe, efficient robot plans that account for environmental constraints and real-time sensor data.
+
+        Key considerations:
+        1. Prioritize safety - avoid obstacles and dangerous situations
+        2. Consider robot's current state (position, battery, etc.)
+        3. Account for environmental constraints (obstacles, layout)
+        4. Provide multiple options when uncertainty exists
+        5. Include safety checks and validation steps
+        6. Consider time efficiency while maintaining safety
+        7. Plan for contingencies and error recovery
+        8. Return only valid JSON with the specified structure
+        """
+
+    def validate_contextual_plan(self, plan_json_str):
+        """Validate contextual plan"""
+        try:
+            plan = json.loads(plan_json_str)
+
+            required_fields = ['actions', 'safety_considerations', 'estimated_time', 'confidence']
+            if not all(field in plan for field in required_fields):
+                return False
+
+            if not isinstance(plan['actions'], list):
+                return False
+
+            if not (0 <= plan.get('confidence', 0) <= 1):
+                return False
+
+            return True
+
+        except json.JSONDecodeError:
+            return False
+        except Exception:
+            return False
+
+    def publish_contextual_plan(self, plan_json_str, original_command):
+        """Publish contextual plan with metadata"""
+        # Add metadata to the plan
+        plan_data = json.loads(plan_json_str)
+        plan_data['original_command'] = original_command
+        plan_data['generation_time'] = time.time()
+
+        plan_msg = String()
+        plan_msg.data = json.dumps(plan_data)
+        self.plan_pub.publish(plan_msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ContextAwarePlanner()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        print("Shutting down context-aware planner...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    # Set your OpenAI API key here or via environment variable
+    # openai.api_key = "your-api-key-here"
+    main()
+```
+
+## Task Decomposition and Sequencing
+
+### Hierarchical Task Planner
+
+```python
+#!/usr/bin/env python3
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from action_msgs.msg import GoalStatus
+import openai
+import json
+import threading
+from queue import Queue
+import time
+from typing import List, Dict, Any
+
+class HierarchicalTaskPlanner(Node):
+    def __init__(self):
+        super().__init__('hierarchical_task_planner')
+
+        # Subscribe to high-level commands
+        self.high_level_sub = self.create_subscription(
+            String,
+            '/high_level_command',
+            self.high_level_callback,
+            10
+        )
+
+        # Publishers
+        self.task_pub = self.create_publisher(String, '/decomposed_tasks', 10)
+        self.subtask_pub = self.create_publisher(String, '/subtasks', 10)
+
+        # LLM configuration
+        self.model = "gpt-4"
+        self.max_tokens = 1000
+        self.temperature = 0.1
+
+        # Task queues
+        self.high_level_queue = Queue()
+        self.task_decomposition_thread = threading.Thread(
+            target=self.task_decomposition_worker, daemon=True
+        )
+        self.task_decomposition_thread.start()
+
+        # Task execution context
+        self.current_tasks = {}
+        self.task_dependencies = {}
+
+        # Robot capabilities and constraints
+        self.robot_capabilities = {
+            "navigation": {
+                "max_speed": 0.5,
+                "turn_speed": 0.8,
+                "step_height": 0.1
+            },
+            "manipulation": {
+                "max_weight": 2.0,
+                "reach_distance": 1.0,
+                "precision": "high"
+            },
+            "sensors": {
+                "camera": True,
+                "lidar": True,
+                "imu": True,
+                "microphone": True
+            }
+        }
+
+        self.get_logger().info('Hierarchical Task Planner initialized')
+
+    def high_level_callback(self, msg):
+        """Process high-level command for decomposition"""
+        command = msg.data.strip()
+        if command:
+            self.get_logger().info(f'Received high-level command: "{command}"')
+            self.high_level_queue.put({
+                'command': command,
+                'timestamp': time.time(),
+                'task_id': f"task_{int(time.time() * 1000)}"
+            })
+
+    def task_decomposition_worker(self):
+        """Worker thread for task decomposition"""
+        while rclpy.ok():
+            try:
+                task_request = self.high_level_queue.get(timeout=1.0)
+                self.decompose_task(task_request)
+            except:
+                continue
+
+    def decompose_task(self, task_request):
+        """Decompose high-level task into subtasks using LLM"""
+        command = task_request['command']
+        task_id = task_request['task_id']
+
+        try:
+            # Create decomposition prompt
+            prompt = self.create_decomposition_prompt(command)
+
+            # Call LLM for task decomposition
+            response = openai.ChatCompletion.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.get_decomposition_system_prompt()},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=self.max_tokens,
+                temperature=self.temperature
+            )
+
+            decomposition_json = response.choices[0].message.content.strip()
+
+            # Validate and process decomposition
+            if self.validate_decomposition(decomposition_json):
+                decomposition = json.loads(decomposition_json)
+                self.process_decomposition(decomposition, task_id, command)
+                self.get_logger().info(f'Decomposed task {task_id}: "{command}"')
+            else:
+                self.get_logger().error(f'Invalid decomposition for task {task_id}')
+
+        except Exception as e:
+            self.get_logger().error(f'Task decomposition error: {str(e)}')
+
+    def create_decomposition_prompt(self, command):
+        """Create prompt for task decomposition"""
+        return f"""
+        You are a hierarchical task planner for a humanoid robot. Decompose the following high-level command into a structured task hierarchy.
+
+        Robot capabilities and constraints: {json.dumps(self.robot_capabilities, indent=2)}
+
+        High-level command: "{command}"
+
+        Decompose this into a hierarchical structure with:
+        1. Main tasks (high-level steps)
+        2. Subtasks (detailed actions for each main task)
+        3. Primitives (basic robot actions for each subtask)
+
+        Consider:
+        - Task dependencies and ordering
+        - Resource requirements
+        - Safety constraints
+        - Environmental context
+        - Robot capabilities
+
+        Return a JSON object with structure:
+        {{
+            "task_id": "unique identifier",
+            "original_command": "the original command",
+            "main_tasks": [
+                {{
+                    "id": "main_task_1",
+                    "description": "what this task accomplishes",
+                    "subtasks": [
+                        {{
+                            "id": "subtask_1_1",
+                            "description": "detailed subtask description",
+                            "primitives": [
+                                {{
+                                    "action": "robot primitive action",
+                                    "parameters": {{"param": "value"}},
+                                    "preconditions": ["condition1", "condition2"],
+                                    "postconditions": ["result1", "result2"],
+                                    "estimated_duration": 5.0
+                                }}
+                            ],
+                            "dependencies": ["other_subtask_id"],  # tasks that must complete first
+                            "success_criteria": "how to verify this subtask succeeded"
+                        }}
+                    ],
+                    "success_criteria": "how to verify this main task succeeded"
+                }}
+            ],
+            "overall_success_criteria": "how to verify the entire command was completed",
+            "estimated_total_time": 120.0,
+            "risk_assessment": "potential risks and mitigation strategies"
+        }}
+
+        Example for command "Clean the room":
+        {{
+            "task_id": "task_001",
+            "original_command": "Clean the room",
+            "main_tasks": [
+                {{
+                    "id": "navigation",
+                    "description": "Navigate to cleaning locations",
+                    "subtasks": [
+                        {{
+                            "id": "move_to_dining_table",
+                            "description": "Move to the dining table area",
+                            "primitives": [
+                                {{
+                                    "action": "navigate_to",
+                                    "parameters": {{"x": 2.0, "y": 1.5}},
+                                    "preconditions": ["robot_is_idle"],
+                                    "postconditions": ["robot_at_destination"],
+                                    "estimated_duration": 15.0
+                                }}
+                            ],
+                            "dependencies": [],
+                            "success_criteria": "Robot has reached the dining table"
+                        }}
+                    ],
+                    "success_criteria": "Robot has navigated to all cleaning locations"
+                }}
+            ],
+            "overall_success_criteria": "Room is clean as specified",
+            "estimated_total_time": 1800.0,
+            "risk_assessment": "Risk of collision with furniture, mitigation: use obstacle avoidance"
+        }}
+        """
+
+    def get_decomposition_system_prompt(self):
+        """System prompt for task decomposition"""
+        return """
+        You are an expert hierarchical task decomposition system for robotics. Your role is to break down complex commands into executable task hierarchies.
+
+        Requirements:
+        1. Create logical task hierarchies with clear dependencies
+        2. Include detailed preconditions and postconditions
+        3. Consider resource constraints and capabilities
+        4. Account for safety and risk mitigation
+        5. Provide realistic time estimates
+        6. Structure tasks for parallel execution where possible
+        7. Include error recovery strategies
+        8. Return only valid JSON with the specified structure
+        """
+
+    def validate_decomposition(self, decomposition_json_str):
+        """Validate task decomposition"""
+        try:
+            decomposition = json.loads(decomposition_json_str)
+
+            required_fields = ['task_id', 'main_tasks', 'overall_success_criteria']
+            if not all(field in decomposition for field in required_fields):
+                return False
+
+            # Validate main tasks structure
+            for main_task in decomposition.get('main_tasks', []):
+                if 'subtasks' not in main_task:
+                    return False
+                for subtask in main_task.get('subtasks', []):
+                    if 'primitives' not in subtask:
+                        return False
+                    for primitive in subtask.get('primitives', []):
+                        if 'action' not in primitive:
+                            return False
+
+            return True
+
+        except json.JSONDecodeError:
+            return False
+        except Exception:
+            return False
+
+    def process_decomposition(self, decomposition, task_id, original_command):
+        """Process the decomposed task structure"""
+        # Store task in current tasks
+        self.current_tasks[task_id] = {
+            'decomposition': decomposition,
+            'status': 'pending',
+            'start_time': time.time()
+        }
+
+        # Publish main tasks
+        main_tasks_msg = String()
+        main_tasks_msg.data = json.dumps({
+            'task_id': task_id,
+            'main_tasks': decomposition['main_tasks'],
+            'original_command': original_command
+        })
+        self.task_pub.publish(main_tasks_msg)
+
+        # Publish subtasks for execution
+        for main_task in decomposition['main_tasks']:
+            for subtask in main_task.get('subtasks', []):
+                subtask_msg = String()
+                subtask_msg.data = json.dumps({
+                    'task_id': task_id,
+                    'main_task_id': main_task['id'],
+                    'subtask': subtask
+                })
+                self.subtask_pub.publish(subtask_msg)
+
+    def update_task_status(self, task_id, status):
+        """Update status of a task"""
+        if task_id in self.current_tasks:
+            self.current_tasks[task_id]['status'] = status
+            self.current_tasks[task_id]['last_update'] = time.time()
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = HierarchicalTaskPlanner()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        print("Shutting down hierarchical task planner...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    # Set your OpenAI API key here or via environment variable
+    # openai.api_key = "your-api-key-here"
+    main()
+```
+
+## Multi-Modal Reasoning
+
+### Multi-Modal Cognitive Planner
+
+```python
+#!/usr/bin/env python3
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from sensor_msgs.msg import Image, LaserScan
+from geometry_msgs.msg import PointStamped
+from cv_bridge import CvBridge
+import openai
+import json
+import threading
+from queue import Queue
+import numpy as np
+import base64
+import io
+from PIL import Image as PILImage
+
+class MultiModalCognitivePlanner(Node):
+    def __init__(self):
+        super().__init__('multi_modal_cognitive_planner')
+
+        # Subscribe to natural language and sensor data
+        self.command_sub = self.create_subscription(
+            String,
+            '/natural_language_command',
+            self.command_callback,
+            10
+        )
+
+        self.image_sub = self.create_subscription(
+            Image,
+            '/camera/image_raw',
+            self.image_callback,
+            10
+        )
+
+        self.scan_sub = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.scan_callback,
+            10
+        )
+
+        # Publishers
+        self.plan_pub = self.create_publisher(String, '/multi_modal_plan', 10)
+        self.vision_pub = self.create_publisher(String, '/vision_analysis', 10)
+
+        # CV Bridge for image processing
+        self.bridge = CvBridge()
+
+        # LLM configuration for vision-language models
+        self.vision_model = "gpt-4-vision-preview"  # For vision tasks
+        self.text_model = "gpt-4"  # For text planning
+        self.max_tokens = 800
+        self.temperature = 0.3
+
+        # Multi-modal data storage
+        self.current_image = None
+        self.current_scan = None
+        self.last_image_time = 0
+        self.image_timeout = 5.0  # seconds
+
+        # Planning queues
+        self.planning_queue = Queue()
+        self.planning_thread = threading.Thread(target=self.planning_worker, daemon=True)
+        self.planning_thread.start()
+
+        # Robot and environment context
+        self.robot_capabilities = [
+            "move_forward", "move_backward", "turn_left", "turn_right",
+            "navigate_to", "pick_object", "place_object", "detect_object",
+            "grasp", "release", "avoid_obstacle"
+        ]
+
+        self.get_logger().info('Multi-Modal Cognitive Planner initialized')
+
+    def command_callback(self, msg):
+        """Process natural language command with multi-modal context"""
+        command = msg.data.strip()
+        if command:
+            self.get_logger().info(f'Received multi-modal command: "{command}"')
+
+            # Check if we have recent image data
+            current_time = self.get_clock().now().nanoseconds / 1e9
+            has_recent_image = (current_time - self.last_image_time) < self.image_timeout
+
+            if has_recent_image and self.current_image is not None:
+                # Process with both text and image
+                self.planning_queue.put({
+                    'command': command,
+                    'image': self.current_image,
+                    'scan': self.current_scan,
+                    'timestamp': current_time
+                })
+            else:
+                # Process with text only
+                self.get_logger().warn('No recent image available, processing text-only command')
+                self.planning_queue.put({
+                    'command': command,
+                    'image': None,
+                    'scan': self.current_scan,
+                    'timestamp': current_time
+                })
+
+    def image_callback(self, msg):
+        """Process camera image"""
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            self.current_image = cv_image
+            self.last_image_time = self.get_clock().now().nanoseconds / 1e9
+        except Exception as e:
+            self.get_logger().error(f'Image callback error: {str(e)}')
+
+    def scan_callback(self, msg):
+        """Process laser scan"""
+        self.current_scan = msg
+
+    def planning_worker(self):
+        """Worker thread for multi-modal planning"""
+        while rclpy.ok():
+            try:
+                plan_request = self.planning_queue.get(timeout=1.0)
+                self.process_multi_modal_command(plan_request)
+            except:
+                continue
+
+    def process_multi_modal_command(self, plan_request):
+        """Process command using both text and visual information"""
+        command = plan_request['command']
+        image = plan_request['image']
+        scan = plan_request['scan']
+
+        try:
+            if image is not None:
+                # Use vision model for image analysis
+                vision_analysis = self.analyze_image_with_llm(image, command)
+
+                # Publish vision analysis
+                vision_msg = String()
+                vision_msg.data = vision_analysis
+                self.vision_pub.publish(vision_msg)
+
+                # Create comprehensive prompt with vision analysis
+                prompt = self.create_multi_modal_prompt(command, vision_analysis, scan)
+            else:
+                # Text-only processing
+                prompt = self.create_text_only_prompt(command, scan)
+
+            # Generate plan using text model
+            response = openai.ChatCompletion.create(
+                model=self.text_model,
+                messages=[
+                    {"role": "system", "content": self.get_multi_modal_system_prompt()},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=self.max_tokens,
+                temperature=self.temperature
+            )
+
+            plan_json = response.choices[0].message.content.strip()
+
+            # Validate and publish plan
+            if self.validate_multi_modal_plan(plan_json):
+                self.publish_multi_modal_plan(plan_json, command, vision_analysis if 'vision_analysis' in locals() else None)
+                self.get_logger().info(f'Generated multi-modal plan for: "{command}"')
+            else:
+                self.get_logger().error('Invalid multi-modal plan generated')
+
+        except Exception as e:
+            self.get_logger().error(f'Multi-modal planning error: {str(e)}')
+
+    def analyze_image_with_llm(self, image, command):
+        """Analyze image using vision-capable LLM"""
+        try:
+            # Convert OpenCV image to base64
+            success, encoded_image = cv2.imencode('.jpg', image)
+            if not success:
+                return None
+
+            image_base64 = base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+
+            # Create vision analysis prompt
+            vision_prompt = f"""
+            Analyze this image in the context of the following command: "{command}"
+
+            Describe what you see in the image that is relevant to executing this command.
+            Identify objects, obstacles, surfaces, and any other relevant visual information.
+            If the command involves finding or interacting with specific objects, note their locations and characteristics.
+            """
+
+            # Call vision model (this is a simplified example - actual implementation would use the vision API)
+            # For now, we'll simulate the vision analysis
+            vision_analysis = {
+                "objects_detected": ["table", "chair", "book"],
+                "obstacles": ["chair_at_x_1_y_2"],
+                "relevant_features": ["clear_path_to_table", "book_on_table"],
+                "action_suggestions": ["navigate_to_table", "pick_up_book"]
+            }
+
+            return json.dumps(vision_analysis)
+
+        except Exception as e:
+            self.get_logger().error(f'Vision analysis error: {str(e)}')
+            return json.dumps({"error": str(e)})
+
+    def create_multi_modal_prompt(self, command, vision_analysis, scan):
+        """Create prompt combining text command and visual analysis"""
+        scan_info = "No scan data available"
+        if scan is not None:
+            # Extract relevant information from scan
+            valid_ranges = [r for r in scan.ranges if r >= scan.range_min and r <= scan.range_max]
+            if valid_ranges:
+                min_distance = min(valid_ranges) if valid_ranges else float('inf')
+                scan_info = f"Closest obstacle: {min_distance:.2f}m, Valid ranges: {len(valid_ranges)}"
+            else:
+                scan_info = "No obstacles detected in range"
+
+        return f"""
+        You are a multi-modal cognitive planner that combines natural language understanding with visual perception.
+
+        Natural language command: "{command}"
+
+        Visual analysis: {vision_analysis}
+
+        Sensor data (LIDAR): {scan_info}
+
+        Robot capabilities: {', '.join(self.robot_capabilities)}
+
+        Create an action plan that leverages both the linguistic command and visual information.
+        Consider how the visual scene should influence the execution of the command.
+
+        Respond with a JSON object containing:
+        - "actions": List of actions with parameters
+        - "visual_guidance": How visual information guides the plan
+        - "safety_considerations": Safety factors based on visual and sensor data
+        - "estimated_time": Time estimate considering visual scene complexity
+        """
+
+    def create_text_only_prompt(self, command, scan):
+        """Create prompt for text-only processing"""
+        scan_info = "No scan data available"
+        if scan is not None:
+            valid_ranges = [r for r in scan.ranges if r >= scan.range_min and r <= scan.range_max]
+            if valid_ranges:
+                min_distance = min(valid_ranges) if valid_ranges else float('inf')
+                scan_info = f"Closest obstacle: {min_distance:.2f}m"
+            else:
+                scan_info = "No obstacles detected in range"
+
+        return f"""
+        You are a cognitive planner for a humanoid robot.
+
+        Natural language command: "{command}"
+
+        Sensor data (LIDAR): {scan_info}
+
+        Robot capabilities: {', '.join(self.robot_capabilities)}
+
+        Create an action plan based on the command and available sensor data.
+
+        Respond with a JSON object containing:
+        - "actions": List of actions with parameters
+        - "safety_considerations": Safety factors based on sensor data
+        - "estimated_time": Time estimate
+        """
+
+    def get_multi_modal_system_prompt(self):
+        """System prompt for multi-modal planning"""
+        return """
+        You are an expert multi-modal cognitive planner that combines language understanding with visual perception and sensor data to create robot action plans.
+
+        Guidelines:
+        1. Integrate visual information with linguistic commands
+        2. Consider sensor data for safety and navigation
+        3. Create plans that are aware of the visual scene
+        4. Use visual features to guide action execution
+        5. Account for uncertainties in perception
+        6. Return only valid JSON with the specified structure
+        """
+
+    def validate_multi_modal_plan(self, plan_json_str):
+        """Validate multi-modal plan"""
+        try:
+            plan = json.loads(plan_json_str)
+
+            required_fields = ['actions', 'estimated_time']
+            if not all(field in plan for field in required_fields):
+                return False
+
+            if not isinstance(plan['actions'], list):
+                return False
+
+            return True
+
+        except json.JSONDecodeError:
+            return False
+        except Exception:
+            return False
+
+    def publish_multi_modal_plan(self, plan_json_str, original_command, vision_analysis):
+        """Publish multi-modal plan"""
+        plan_data = json.loads(plan_json_str)
+        plan_data['original_command'] = original_command
+        plan_data['vision_analysis'] = vision_analysis
+        plan_data['generation_time'] = time.time()
+
+        plan_msg = String()
+        plan_msg.data = json.dumps(plan_data)
+        self.plan_pub.publish(plan_msg)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = MultiModalCognitivePlanner()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        print("Shutting down multi-modal cognitive planner...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    import cv2  # Import here to avoid issues if not available
+    # Set your OpenAI API key here or via environment variable
+    # openai.api_key = "your-api-key-here"
+    main()
+```
+
+## Safety and Validation in LLM-Driven Robotics
+
+### Safe LLM Planning with Validation
+
+```python
+#!/usr/bin/env python3
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import LaserScan
+from action_msgs.msg import GoalStatus
+import openai
+import json
+import threading
+from queue import Queue
+import time
+import math
+
+class SafeLLMPlanner(Node):
+    def __init__(self):
+        super().__init__('safe_llm_planner')
+
+        # Subscribe to commands and sensor data
+        self.command_sub = self.create_subscription(
+            String,
+            '/natural_language_command',
+            self.command_callback,
+            10
+        )
+
+        self.scan_sub = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.scan_callback,
+            10
+        )
+
+        # Publishers
+        self.plan_pub = self.create_publisher(String, '/safe_plan', 10)
+        self.validation_pub = self.create_publisher(String, '/validation_result', 10)
+        self.emergency_stop_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+
+        # LLM configuration
+        self.model = "gpt-4"
+        self.max_tokens = 600
+        self.temperature = 0.1  # Lower temperature for more consistent safety reasoning
+
+        # Safety parameters
+        self.safety_thresholds = {
+            'min_obstacle_distance': 0.5,  # meters
+            'max_navigation_speed': 0.3,   # m/s
+            'max_rotation_speed': 0.5,     # rad/s
+            'max_plan_length': 50          # max number of actions
+        }
+
+        # Current sensor data
+        self.current_scan = None
+        self.last_scan_time = 0
+
+        # Planning queues
+        self.planning_queue = Queue()
+        self.planning_thread = threading.Thread(target=self.planning_worker, daemon=True)
+        self.planning_thread.start()
+
+        # Safety monitoring
+        self.safety_violations = 0
+        self.max_safety_violations = 5
+
+        self.get_logger().info('Safe LLM Planner initialized')
+
+    def command_callback(self, msg):
+        """Process command with safety validation"""
+        command = msg.data.strip()
+        if command:
+            self.get_logger().info(f'Received command for safe planning: "{command}"')
+
+            # Check safety before planning
+            if self.is_environment_safe():
+                self.planning_queue.put({
+                    'command': command,
+                    'timestamp': time.time(),
+                    'scan': self.current_scan
+                })
+            else:
+                self.get_logger().error('Unsafe environment detected, rejecting command')
+                self.publish_validation_result("unsafe_environment", command)
+
+    def scan_callback(self, msg):
+        """Update sensor data"""
+        self.current_scan = msg
+        self.last_scan_time = time.time()
+
+    def is_environment_safe(self):
+        """Check if environment is safe for robot operation"""
+        if self.current_scan is None:
+            return False  # No sensor data, assume unsafe
+
+        # Check for obstacles too close
+        valid_ranges = [r for r in self.current_scan.ranges
+                       if self.current_scan.range_min <= r <= self.current_scan.range_max]
+
+        if valid_ranges:
+            min_distance = min(valid_ranges)
+            if min_distance < self.safety_thresholds['min_obstacle_distance']:
+                self.get_logger().warn(f'Obstacle too close: {min_distance:.2f}m < {self.safety_thresholds["min_obstacle_distance"]}m')
+                return False
+
+        return True
+
+    def planning_worker(self):
+        """Worker thread for safe planning"""
+        while rclpy.ok():
+            try:
+                plan_request = self.planning_queue.get(timeout=1.0)
+                self.safe_plan_with_llm(plan_request)
+            except:
+                continue
+
+    def safe_plan_with_llm(self, plan_request):
+        """Generate plan with safety considerations using LLM"""
+        command = plan_request['command']
+        scan = plan_request['scan']
+
+        try:
+            # Create safety-aware prompt
+            prompt = self.create_safety_aware_prompt(command, scan)
+
+            # Generate plan with LLM
+            response = openai.ChatCompletion.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.get_safety_system_prompt()},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=self.max_tokens,
+                temperature=self.temperature
+            )
+
+            plan_json = response.choices[0].message.content.strip()
+
+            # Validate plan safety
+            if self.validate_plan_safety(plan_json, scan):
+                # Additional safety checks
+                if self.perform_safety_analysis(plan_json):
+                    self.publish_safe_plan(plan_json, command)
+                    self.get_logger().info(f'Generated safe plan for: "{command}"')
+                else:
+                    self.get_logger().error('Plan failed additional safety analysis')
+                    self.publish_validation_result("failed_safety_analysis", command)
+            else:
+                self.get_logger().error('Plan failed safety validation')
+                self.publish_validation_result("unsafe_plan", command)
+
+        except Exception as e:
+            self.get_logger().error(f'Safe planning error: {str(e)}')
+            self.publish_validation_result(f"planning_error: {str(e)}", command)
+
+    def create_safety_aware_prompt(self, command, scan):
+        """Create prompt that emphasizes safety"""
+        scan_info = "No scan data available"
+        if scan is not None:
+            valid_ranges = [r for r in scan.ranges if scan.range_min <= r <= scan.range_max]
+            if valid_ranges:
+                min_distance = min(valid_ranges)
+                scan_info = f"Closest obstacle: {min_distance:.2f}m, Safe threshold: {self.safety_thresholds['min_obstacle_distance']}m"
+
+        return f"""
+        You are a safety-critical cognitive planner for a humanoid robot. Safety is the highest priority.
+
+        Command: "{command}"
+
+        Sensor data: {scan_info}
+
+        Safety requirements:
+        1. Maintain minimum distance of {self.safety_thresholds['min_obstacle_distance']}m from obstacles
+        2. Limit navigation speed to {self.safety_thresholds['max_navigation_speed']} m/s
+        3. Limit rotation speed to {self.safety_thresholds['max_rotation_speed']} rad/s
+        4. Plan maximum {self.safety_thresholds['max_plan_length']} actions
+        5. Include safety checks between navigation actions
+        6. Plan escape routes and safe positions
+        7. Verify each action is physically possible
+
+        Robot capabilities: move_forward, move_backward, turn_left, turn_right,
+                           navigate_to, stop, detect_obstacle, avoid_obstacle
+
+        Generate a safe action plan with detailed safety considerations.
+
+        Respond with JSON containing:
+        - "actions": List of safe actions
+        - "safety_analysis": Detailed safety analysis of the plan
+        - "risk_assessment": Potential risks and mitigation strategies
+        - "safety_confidence": Confidence level in plan safety (0-1)
+        """
+
+    def get_safety_system_prompt(self):
+        """System prompt emphasizing safety"""
+        return """
+        You are an expert safety-critical robotic planner. Your primary responsibility is to ensure all planned actions are safe for the robot and environment.
+
+        Safety requirements:
+        1. Always prioritize safety over task completion
+        2. Verify each action against physical constraints
+        3. Include safety checks and validations
+        4. Plan for contingencies and error recovery
+        5. Consider sensor limitations and uncertainties
+        6. Include escape routes and safe positions
+        7. Verify plan feasibility before returning
+        8. Return only valid JSON with the specified structure
+        """
+
+    def validate_plan_safety(self, plan_json_str, scan):
+        """Validate plan safety against constraints"""
+        try:
+            plan = json.loads(plan_json_str)
+
+            # Check required fields
+            required_fields = ['actions', 'safety_analysis', 'safety_confidence']
+            if not all(field in plan for field in required_fields):
+                return False
+
+            # Validate safety confidence
+            safety_confidence = plan.get('safety_confidence', 0)
+            if safety_confidence < 0.7:  # Require high safety confidence
+                self.get_logger().warn(f'Low safety confidence: {safety_confidence}')
+                return False
+
+            # Validate action count
+            actions = plan.get('actions', [])
+            if len(actions) > self.safety_thresholds['max_plan_length']:
+                self.get_logger().warn(f'Too many actions: {len(actions)} > {self.safety_thresholds["max_plan_length"]}')
+                return False
+
+            # Check for safe navigation parameters
+            for action in actions:
+                if action.get('action') in ['move_forward', 'move_backward', 'navigate_to']:
+                    # Check if parameters are safe (simplified check)
+                    params = action.get('parameters', {})
+                    speed = params.get('speed', 0.5)
+                    if speed > self.safety_thresholds['max_navigation_speed']:
+                        self.get_logger().warn(f'Unsafe speed: {speed} > {self.safety_thresholds["max_navigation_speed"]}')
+                        return False
+
+            return True
+
+        except json.JSONDecodeError:
+            return False
+        except Exception as e:
+            self.get_logger().error(f'Plan safety validation error: {str(e)}')
+            return False
+
+    def perform_safety_analysis(self, plan_json_str):
+        """Perform additional safety analysis on the plan"""
+        try:
+            plan = json.loads(plan_json_str)
+            actions = plan.get('actions', [])
+
+            # Analyze each action for safety
+            for i, action in enumerate(actions):
+                action_type = action.get('action')
+
+                if action_type in ['navigate_to', 'move_to']:
+                    # Check if navigation target is safe based on scan data
+                    if not self.is_navigation_target_safe(action):
+                        self.get_logger().warn(f'Unsafe navigation target in action {i}')
+                        return False
+
+                elif action_type in ['move_forward', 'move_backward']:
+                    # Check if movement direction is safe
+                    if not self.is_movement_safe(action):
+                        self.get_logger().warn(f'Unsafe movement in action {i}')
+                        return False
+
+            return True
+
+        except Exception as e:
+            self.get_logger().error(f'Safety analysis error: {str(e)}')
+            return False
+
+    def is_navigation_target_safe(self, action):
+        """Check if navigation target is safe"""
+        # In a real system, this would check the target location against map/scan data
+        # For simulation, assume safe if we have valid coordinates
+        params = action.get('parameters', {})
+        x = params.get('x')
+        y = params.get('y')
+
+        return x is not None and y is not None and abs(x) < 100 and abs(y) < 100
+
+    def is_movement_safe(self, action):
+        """Check if movement action is safe"""
+        # In a real system, this would check movement direction against scan data
+        # For simulation, assume safe
+        return True
+
+    def publish_safe_plan(self, plan_json_str, original_command):
+        """Publish validated safe plan"""
+        plan_data = json.loads(plan_json_str)
+        plan_data['original_command'] = original_command
+        plan_data['generation_time'] = time.time()
+        plan_data['validated_safe'] = True
+
+        plan_msg = String()
+        plan_msg.data = json.dumps(plan_data)
+        self.plan_pub.publish(plan_msg)
+
+        # Publish validation success
+        validation_msg = String()
+        validation_msg.data = f"success: {original_command}"
+        self.validation_pub.publish(validation_msg)
+
+    def publish_validation_result(self, result, command):
+        """Publish validation result"""
+        validation_msg = String()
+        validation_msg.data = f"{result}: {command}"
+        self.validation_pub.publish(validation_msg)
+
+        # Increment safety violations counter
+        self.safety_violations += 1
+
+        if self.safety_violations >= self.max_safety_violations:
+            self.get_logger().error('Too many safety violations, emergency stop')
+            self.emergency_stop()
+            self.safety_violations = 0  # Reset counter after emergency stop
+
+    def emergency_stop(self):
+        """Publish emergency stop command"""
+        stop_cmd = Twist()
+        stop_cmd.linear.x = 0.0
+        stop_cmd.angular.z = 0.0
+        self.emergency_stop_pub.publish(stop_cmd)
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = SafeLLMPlanner()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        print("Shutting down safe LLM planner...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    # Set your OpenAI API key here or via environment variable
+    # openai.api_key = "your-api-key-here"
+    main()
+```
+
+## Hands-on Lab: Complete Cognitive Planning System
+
+In this lab, you'll create a complete cognitive planning system that integrates all components.
+
+### Step 1: Create the Cognitive Planning System Launch File
+
+Create `cognitive_planning_system_launch.py`:
+
+```python
+#!/usr/bin/env python3
+
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+
+def generate_launch_description():
+    # Declare launch arguments
+    use_sim_time = LaunchConfiguration('use_sim_time', default='true')
+
+    # Cognitive planning system nodes
+    llm_planner = Node(
+        package='ai_robo_learning',
+        executable='llm_cognitive_planner',
+        name='llm_cognitive_planner',
+        parameters=[{'use_sim_time': use_sim_time}]
+    )
+
+    context_planner = Node(
+        package='ai_robo_learning',
+        executable='context_aware_planner',
+        name='context_aware_planner',
+        parameters=[{'use_sim_time': use_sim_time}]
+    )
+
+    hierarchical_planner = Node(
+        package='ai_robo_learning',
+        executable='hierarchical_task_planner',
+        name='hierarchical_task_planner',
+        parameters=[{'use_sim_time': use_sim_time}]
+    )
+
+    multimodal_planner = Node(
+        package='ai_robo_learning',
+        executable='multi_modal_cognitive_planner',
+        name='multi_modal_cognitive_planner',
+        parameters=[{'use_sim_time': use_sim_time}]
+    )
+
+    safe_planner = Node(
+        package='ai_robo_learning',
+        executable='safe_llm_planner',
+        name='safe_llm_planner',
+        parameters=[{'use_sim_time': use_sim_time}]
+    )
+
+    # Return launch description
+    ld = LaunchDescription()
+
+    # Add all nodes
+    ld.add_action(llm_planner)
+    ld.add_action(context_planner)
+    ld.add_action(hierarchical_planner)
+    ld.add_action(multimodal_planner)
+    ld.add_action(safe_planner)
+
+    return ld
+```
+
+### Step 2: Create the Complete Cognitive Planning Node
+
+Create `complete_cognitive_planning_system.py`:
+
+```python
+#!/usr/bin/env python3
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import LaserScan, Image
+from action_msgs.msg import GoalStatus
+import openai
+import json
+import threading
+from queue import Queue
+import time
+from typing import Dict, List, Any, Optional
+
+class CompleteCognitivePlanningSystem(Node):
+    def __init__(self):
+        super().__init__('complete_cognitive_planning_system')
+
+        # Subscribe to inputs
+        self.command_sub = self.create_subscription(
+            String,
+            '/natural_language_command',
+            self.command_callback,
+            10
+        )
+
+        self.scan_sub = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self.scan_callback,
+            10
+        )
+
+        # Publishers
+        self.plan_pub = self.create_publisher(String, '/complete_plan', 10)
+        self.status_pub = self.create_publisher(String, '/cognitive_status', 10)
+        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+
+        # LLM configuration
+        self.model = "gpt-4"
+        self.max_tokens = 1000
+        self.temperature = 0.2
+
+        # System components
+        self.current_scan = None
+        self.last_scan_time = 0
+        self.command_queue = Queue()
+
+        # Robot state and capabilities
+        self.robot_state = {
+            'position': [0.0, 0.0, 0.0],
+            'battery': 100.0,
+            'status': 'idle'
+        }
+
+        self.robot_capabilities = {
+            'navigation': {
+                'max_speed': 0.5,
+                'min_obstacle_distance': 0.5
+            },
+            'manipulation': {
+                'max_weight': 2.0,
+                'reach_distance': 1.0
+            }
+        }
+
+        # Planning threads
+        self.planning_thread = threading.Thread(target=self.planning_worker, daemon=True)
+        self.planning_thread.start()
+
+        # System monitoring
+        self.system_monitor_timer = self.create_timer(5.0, self.system_monitor)
+
+        # Safety parameters
+        self.safety_thresholds = {
+            'min_scan_age': 5.0,  # seconds
+            'max_battery_usage': 20.0  # percent per task
+        }
+
+        self.get_logger().info('Complete Cognitive Planning System initialized')
+
+    def command_callback(self, msg):
+        """Process natural language command"""
+        command = msg.data.strip()
+        if command:
+            self.get_logger().info(f'Received cognitive command: "{command}"')
+
+            # Check if we have recent sensor data
+            current_time = time.time()
+            scan_age = current_time - self.last_scan_time if self.last_scan_time > 0 else float('inf')
+
+            if scan_age > self.safety_thresholds['min_scan_age']:
+                self.get_logger().warn('Sensor data too old, waiting for fresh data')
+                return
+
+            # Add to planning queue
+            self.command_queue.put({
+                'command': command,
+                'timestamp': current_time,
+                'robot_state': self.robot_state.copy(),
+                'scan': self.current_scan
+            })
+
+    def scan_callback(self, msg):
+        """Update sensor data"""
+        self.current_scan = msg
+        self.last_scan_time = time.time()
+
+    def planning_worker(self):
+        """Worker thread for cognitive planning"""
+        while rclpy.ok():
+            try:
+                plan_request = self.command_queue.get(timeout=1.0)
+                self.generate_cognitive_plan(plan_request)
+            except:
+                continue
+
+    def generate_cognitive_plan(self, plan_request):
+        """Generate complete cognitive plan using LLM"""
+        command = plan_request['command']
+        robot_state = plan_request['robot_state']
+        scan = plan_request['scan']
+
+        try:
+            # Create comprehensive prompt
+            prompt = self.create_comprehensive_prompt(command, robot_state, scan)
+
+            # Call LLM
+            response = openai.ChatCompletion.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.get_comprehensive_system_prompt()},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=self.max_tokens,
+                temperature=self.temperature
+            )
+
+            plan_json = response.choices[0].message.content.strip()
+
+            # Validate plan
+            if self.validate_cognitive_plan(plan_json):
+                # Publish plan
+                self.publish_cognitive_plan(plan_json, command, robot_state)
+
+                # Update robot state
+                self.robot_state['status'] = 'planning'
+
+                self.get_logger().info(f'Generated cognitive plan for: "{command}"')
+            else:
+                self.get_logger().error('Invalid cognitive plan generated')
+                self.publish_error_status(f"Invalid plan for command: {command}")
+
+        except Exception as e:
+            self.get_logger().error(f'Cognitive planning error: {str(e)}')
+            self.publish_error_status(f"Planning error: {str(e)}")
+
+    def create_comprehensive_prompt(self, command, robot_state, scan):
+        """Create comprehensive prompt for cognitive planning"""
+        scan_info = "No scan data available"
+        if scan is not None:
+            valid_ranges = [r for r in scan.ranges if scan.range_min <= r <= scan.range_max]
+            if valid_ranges:
+                min_distance = min(valid_ranges)
+                avg_distance = sum(valid_ranges) / len(valid_ranges)
+                scan_info = f"Min obstacle distance: {min_distance:.2f}m, Avg: {avg_distance:.2f}m, Valid readings: {len(valid_ranges)}"
+
+        return f"""
+        You are an advanced cognitive planning system for a humanoid robot. Generate a comprehensive plan that considers all aspects of the task.
+
+        Command: "{command}"
+
+        Robot state: {json.dumps(robot_state, indent=2)}
+        Robot capabilities: {json.dumps(self.robot_capabilities, indent=2)}
+        Sensor data: {scan_info}
+
+        Create a detailed cognitive plan that includes:
+        1. High-level task decomposition
+        2. Environmental analysis and obstacle considerations
+        3. Safety validation and risk assessment
+        4. Resource management (battery, time, etc.)
+        5. Action sequencing with dependencies
+        6. Contingency planning for failures
+        7. Success criteria and validation steps
+
+        Consider the robot's current state and capabilities when creating the plan.
+
+        Respond with a JSON object containing:
+        - "task_decomposition": Breakdown of main tasks
+        - "environmental_analysis": Analysis of current environment
+        - "safety_assessment": Safety considerations and validations
+        - "action_sequence": Ordered list of actions to execute
+        - "resource_plan": Battery and time usage estimates
+        - "contingency_plans": Backup plans for common failures
+        - "success_criteria": How to verify task completion
+        - "estimated_completion_time": Time estimate in seconds
+        - "confidence_level": Confidence in plan success (0-1)
+        """
+
+    def get_comprehensive_system_prompt(self):
+        """System prompt for comprehensive cognitive planning"""
+        return """
+        You are an expert cognitive planning system for humanoid robots. Create comprehensive, safe, and executable plans that consider all aspects of task execution.
+
+        Requirements:
+        1. Decompose complex tasks into manageable subtasks
+        2. Consider environmental constraints and obstacles
+        3. Validate safety at each step
+        4. Manage robot resources efficiently
+        5. Plan for contingencies and error recovery
+        6. Sequence actions logically with proper dependencies
+        7. Provide realistic time and resource estimates
+        8. Return only valid JSON with the specified structure
+        """
+
+    def validate_cognitive_plan(self, plan_json_str):
+        """Validate cognitive plan"""
+        try:
+            plan = json.loads(plan_json_str)
+
+            required_fields = [
+                'task_decomposition', 'action_sequence',
+                'success_criteria', 'confidence_level'
+            ]
+            if not all(field in plan for field in required_fields):
+                return False
+
+            if not isinstance(plan['action_sequence'], list):
+                return False
+
+            if not (0 <= plan.get('confidence_level', 0) <= 1):
+                return False
+
+            # Validate action sequence
+            for action in plan['action_sequence']:
+                if not isinstance(action, dict) or 'action' not in action:
+                    return False
+
+            return True
+
+        except json.JSONDecodeError:
+            return False
+        except Exception:
+            return False
+
+    def publish_cognitive_plan(self, plan_json_str, original_command, robot_state):
+        """Publish cognitive plan"""
+        plan_data = json.loads(plan_json_str)
+        plan_data['original_command'] = original_command
+        plan_data['robot_state_at_generation'] = robot_state
+        plan_data['generation_time'] = time.time()
+        plan_data['system_version'] = '1.0'
+
+        plan_msg = String()
+        plan_msg.data = json.dumps(plan_data)
+        self.plan_pub.publish(plan_msg)
+
+        # Publish status
+        status_msg = String()
+        status_msg.data = f"plan_generated: {original_command}"
+        self.status_pub.publish(status_msg)
+
+    def publish_error_status(self, error_msg):
+        """Publish error status"""
+        status_msg = String()
+        status_msg.data = f"error: {error_msg}"
+        self.status_pub.publish(status_msg)
+
+    def system_monitor(self):
+        """Monitor system status"""
+        status_msg = String()
+        status_msg.data = f"active: {len(self.command_queue.queue)} commands pending"
+        self.status_pub.publish(status_msg)
+
+        self.get_logger().info(f'System status - Commands pending: {len(self.command_queue.queue)}, Robot state: {self.robot_state["status"]}')
+
+    def destroy_node(self):
+        """Clean up resources"""
+        # Stop planning thread gracefully
+        # In a real system, you might want to implement proper shutdown
+        super().destroy_node()
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = CompleteCognitivePlanningSystem()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        print("Shutting down complete cognitive planning system...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    # Set your OpenAI API key here or via environment variable
+    # openai.api_key = "your-api-key-here"
+    main()
+```
+
+### Step 3: Test the Cognitive Planning System
+
+1. Make sure you have the required dependencies:
+```bash
+pip3 install openai
+# For multi-modal (optional):
+pip3 install pillow opencv-python
+# For NLP (optional):
+pip3 install numpy
+```
+
+2. Set your OpenAI API key:
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+```
+
+3. Run the complete cognitive planning system:
+```bash
+python3 complete_cognitive_planning_system.py
+```
+
+4. Send test commands:
+```bash
+# Send a natural language command
+ros2 topic pub /natural_language_command std_msgs/String "data: 'Navigate to the kitchen and bring me a cup'"
+```
+
+## Best Practices
+
+1. **Safety First**: Always validate plans for safety before execution
+2. **Context Awareness**: Use environmental and sensor data to inform planning
+3. **Task Decomposition**: Break complex commands into manageable subtasks
+4. **Error Handling**: Plan for contingencies and error recovery
+5. **Resource Management**: Consider battery, time, and computational constraints
+6. **Validation**: Verify plan feasibility and safety before execution
+7. **Multi-Modal Integration**: Combine text, vision, and sensor data for better planning
+8. **Continuous Monitoring**: Monitor plan execution and adapt as needed
+
+## Next Steps
+
+After completing this chapter, you'll be ready to learn about computer vision for robotics in Chapter 4, where you'll explore how robots can perceive and understand their visual environment.

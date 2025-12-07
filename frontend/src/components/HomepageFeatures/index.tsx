@@ -11,36 +11,40 @@ type FeatureItem = {
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'Easy to Use',
+    title: 'AI-Powered RAG Chatbot',
     Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
     description: (
       <>
-        Docusaurus was designed from the ground up to be easily installed and
-        used to get your website up and running quickly.
+        <strong>Intelligent Q&A System</strong> built with OpenAI Agents, FastAPI, 
+        Qdrant Cloud, and Neon Postgres. Get instant, context-aware answers about 
+        Physical AI concepts from the textbook content.
       </>
     ),
   },
   {
-    title: 'Focus on What Matters',
+    title: 'Personalized Learning Paths',
     Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
     description: (
       <>
-        Docusaurus lets you focus on your docs, and we&apos;ll do the chores. Go
-        ahead and move your docs into the <code>docs</code> directory.
+        <strong>Adaptive content delivery</strong> using better-auth integration. 
+        Share your software/hardware background during signup to receive chapters 
+        tailored to your expertise level and learning goals.
       </>
     ),
   },
   {
-    title: 'Powered by React',
+    title: 'Multi-language',
     Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
     description: (
       <>
-        Extend or customize your website layout by reusing React. Docusaurus can
-        be extended while reusing the same header and footer.
+        <strong>One-click Urdu translation</strong> for all educational content. 
+        Making Physical AI education accessible to Urdu-speaking students and 
+        professionals worldwide.
       </>
     ),
   },
 ];
+
 
 function Feature({title, Svg, description}: FeatureItem) {
   return (
